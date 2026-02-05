@@ -7,6 +7,11 @@
     "start": "node dist/server.js",
     "build": "tsc",
     "dev": "tsx watch src/server.ts",
+    "generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "push": "prisma db push",
+    "pull": "prisma db pull",
+    "studio": "prisma studio",
     "lint": "pnpm eslint ./src/**/*",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
