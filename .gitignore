@@ -3,4 +3,4 @@ dist
 .env
 .env.*
 ¡.env.example
-/generated/prisma
+/src/generated
