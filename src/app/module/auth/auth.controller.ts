@@ -14,6 +14,18 @@ const registerPatient = catchAsync(async (req: Request, res: Response) => {
     });
 })
 
+const login = catchAsync(async (req: Request, res: Response) => {
+    const payload = req.body;
+    const result = await AuthService.login(payload);
+    sendResponse(res, {
+        httpStatusCode: 200,
+        success: true,
+        message: "Login successful",
+        data: result
+    });
+});
+
 export const AuthController = {
-    registerPatient
+    registerPatient,
+    login
 }
