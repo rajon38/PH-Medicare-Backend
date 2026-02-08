@@ -9,10 +9,10 @@ const createToken = (payload: JwtPayload, secret: string, { expiresIn }:SignOpti
 
 const verifyToken = (token: string, secret: string) => {
     try {
-        const decoded = jwt.verify(token, secret) as JwtPayload;
+        const data = jwt.verify(token, secret) as JwtPayload;
         return {
             success: true,
-            decoded
+            data
         };
     } catch (error: any) {
         return {

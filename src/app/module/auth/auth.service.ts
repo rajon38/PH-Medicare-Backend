@@ -30,8 +30,8 @@ const registerPatient = async (payload: IRegisterPatientPayload) => {
         throw new AppError(status.BAD_REQUEST, "Failed to register patient");
     }
 
+    try {
     const patient = await prisma.$transaction(async (tx) => {
-        try {
             const patientTx = await tx.patient.create({
             data: {
                 userId: data.user!.id,
@@ -40,21 +40,41 @@ const registerPatient = async (payload: IRegisterPatientPayload) => {
             }
         })
         return patientTx;
-        } catch (error) {
-            console.log("Error creating patient record:", error);
-            await prisma.user.delete({
-                where: {
-                    id: data.user!.id
-                }
-            });
-            throw error;
-        }
     });
+    const accessToken = tokenUtils.getAccessToken({
+        userId: data.user.id,
+        role: data.user.role,
+        name: data.user.name,
+        email: data.user.email,
+        status: data.user.status,
+        isDeleted: data.user.isDeleted,
+        emailVerified: data.user.emailVerified,
+    })
 
-    return {
+    const refreshToken = tokenUtils.getRefreshToken({
+        userId: data.user.id,
+        role: data.user.role,
+        name: data.user.name,
+        email: data.user.email,
+        status: data.user.status,
+        isDeleted: data.user.isDeleted,
+        emailVerified: data.user.emailVerified,
+    })
+        return {
         ...data,
+        accessToken,
+        refreshToken,
         patient
     };
+    } catch (error) {
+        console.log("Error creating patient record:", error);
+        await prisma.user.delete({
+            where: {
+                id: data.user!.id
+            }
+        });
+        throw error;
+    }
 }
 
 const login = async (payload: ILoginPayload) => {
