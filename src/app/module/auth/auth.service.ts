@@ -4,18 +4,12 @@ import AppError from "../../errorHelpers/AppError";
 import { auth } from "../../lib/auth";
 import { prisma } from "../../lib/prisma";
 import { tokenUtils } from "../../utils/token";
+import { IRequestUser } from "../../interfaces/requestUser.interface";
+import { jwtUtils } from "../../utils/jwt";
+import { envVars } from "../../config/env";
+import { JwtPayload } from "jsonwebtoken";
 //import { prisma } from "../../lib/prisma";
-
-interface IRegisterPatientPayload {
-    name: string;
-    email: string;
-    password: string;
-}
-
-interface ILoginPayload {
-    email: string;
-    password: string;
-}
+import { IChangePasswordPayload, ILoginUserPayload, IRegisterPatientPayload } from "./auth.interface";
 
 const registerPatient = async (payload: IRegisterPatientPayload) => {
     const { name, email, password } = payload;
@@ -77,7 +71,7 @@ const registerPatient = async (payload: IRegisterPatientPayload) => {
     }
 }
 
-const login = async (payload: ILoginPayload) => {
+const login = async (payload: ILoginUserPayload) => {
     const { email, password } = payload;
     const data = await auth.api.signInEmail({
         body: {
@@ -120,7 +114,181 @@ const login = async (payload: ILoginPayload) => {
     };
 }
 
+const getMe = async (user : IRequestUser) => {
+    const isUserExists = await prisma.user.findUnique({
+        where : {
+            id : user.userId,
+        },
+        include : {
+            patient : {
+                include : {
+                    appointments : true,
+                    reviews : true,
+                    prescriptions : true,
+                    medicalReports : true,
+                    patientHealthData : true,
+                }
+            },
+            doctor : {
+                include : {
+                    specialties : true,
+                    appointments : true,
+                    reviews : true,
+                    prescriptions : true,
+                }
+            },
+            admin : true,
+        }
+    })
+
+    if (!isUserExists) {
+        throw new AppError(status.NOT_FOUND, "User not found");
+    }
+
+    return isUserExists;
+}
+
+const getNewToken = async (refreshToken : string, sessionToken : string) => {
+
+    const isSessionTokenExists = await prisma.session.findUnique({
+        where : {
+            token : sessionToken,
+        },
+        include : {
+            user : true,
+        }
+    })
+
+    if(!isSessionTokenExists){
+        throw new AppError(status.UNAUTHORIZED, "Invalid session token");
+    }
+
+    const verifiedRefreshToken = jwtUtils.verifyToken(refreshToken, envVars.REFRESH_TOKEN_SECRET)
+
+
+    if(!verifiedRefreshToken.success && verifiedRefreshToken.error){
+        throw new AppError(status.UNAUTHORIZED, "Invalid refresh token");
+    }
+
+    const data = verifiedRefreshToken.data as JwtPayload;
+
+    const newAccessToken = tokenUtils.getAccessToken({
+        userId: data.userId,
+        role: data.role,
+        name: data.name,
+        email: data.email,
+        status: data.status,
+        isDeleted: data.isDeleted,
+        emailVerified: data.emailVerified,
+    });
+
+    const newRefreshToken = tokenUtils.getRefreshToken({
+        userId: data.userId,
+        role: data.role,
+        name: data.name,
+        email: data.email,
+        status: data.status,
+        isDeleted: data.isDeleted,
+        emailVerified: data.emailVerified,
+    });
+
+    const {token} = await prisma.session.update({
+        where : {
+            token : sessionToken
+        },
+        data : {
+            token : sessionToken,
+            expiresAt: new Date(Date.now() + 60 * 60 * 60 * 24 * 1000),
+            updatedAt: new Date(),
+        }
+    })
+
+    return {
+        accessToken : newAccessToken,
+        refreshToken : newRefreshToken,
+        sessionToken : token,
+    }
+
+}
+
+const changePassword = async (payload : IChangePasswordPayload, sessionToken : string) =>{
+    const session = await auth.api.getSession({
+        headers : new Headers({
+            Authorization : `Bearer ${sessionToken}`
+        })
+    })
+
+    if(!session){
+        throw new AppError(status.UNAUTHORIZED, "Invalid session token");
+    }
+
+    const {currentPassword, newPassword} = payload;
+
+    const result = await auth.api.changePassword({
+        body :{
+            currentPassword,
+            newPassword,
+            revokeOtherSessions: true,
+        },
+        headers : new Headers({
+            Authorization : `Bearer ${sessionToken}`
+        })
+    })
+
+    if(session.user.needPasswordChange){
+        await prisma.user.update({
+            where: {
+                id: session.user.id,
+            },
+            data: {
+                needPasswordChange: false,
+            }
+        })
+    }
+
+    const accessToken = tokenUtils.getAccessToken({
+        userId: session.user.id,
+        role: session.user.role,
+        name: session.user.name,
+        email: session.user.email,
+        status: session.user.status,
+        isDeleted: session.user.isDeleted,
+        emailVerified: session.user.emailVerified,
+    });
+
+    const refreshToken = tokenUtils.getRefreshToken({
+        userId: session.user.id,
+        role: session.user.role,
+        name: session.user.name,
+        email: session.user.email,
+        status: session.user.status,
+        isDeleted: session.user.isDeleted,
+        emailVerified: session.user.emailVerified,
+    });
+    
+
+    return {
+        ...result,
+        accessToken,
+        refreshToken,
+    }
+}
+
+const logoutUser = async (sessionToken : string) => {
+    const result = await auth.api.signOut({
+        headers : new Headers({
+            Authorization : `Bearer ${sessionToken}`
+        })
+    })
+
+    return result;
+}
+
 export const AuthService = {
     registerPatient,
-    login
+    login,
+    getMe,
+    getNewToken,
+    changePassword,
+    logoutUser,
 }
