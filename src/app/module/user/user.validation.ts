@@ -52,10 +52,10 @@ export const createDoctorZodSchema = z.object({
       .min(1, "Qualification is required")
       .max(100, "Qualification must be less than 100 characters"),
 
-    currentWorkplace: z
-      .string("Current workplace is required and must be a string")
-      .min(1, "Current workplace is required")
-      .max(100, "Current workplace must be less than 100 characters"),
+    currentWorkingPlace: z
+      .string("Current working place is required and must be a string")
+      .min(1, "Current working place is required")
+      .max(100, "Current working place must be less than 100 characters"),
 
     designation: z
       .string("Designation is required and must be a string")
