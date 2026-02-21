@@ -7,7 +7,63 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const MODULES_DIR = path.join(__dirname, "app/module");
+const ROUTES_INDEX = path.join(__dirname, "app/routes/index.ts");
 
+const capitalize = (str) => str.charAt(0).toUpperCase() + str.slice(1);
+
+// Convert camelCase or PascalCase module name to kebab-case route path
+// e.g. "doctorSchedule" → "doctor-schedules", "appointment" → "appointments"
+const toKebabPlural = (str) => {
+  return str
+    .replace(/([a-z])([A-Z])/g, "$1-$2")
+    .toLowerCase()
+    .replace(/s?$/, "s"); // naive pluralisation – adjust per module if needed
+};
+
+// ─── Route Registration ────────────────────────────────────────────────────────
+const registerRoute = (moduleName) => {
+  if (!fs.existsSync(ROUTES_INDEX)) {
+    console.warn(`⚠️  Could not find routes index at: ${ROUTES_INDEX}`);
+    console.warn("   Skipping auto route registration.");
+    return;
+  }
+
+  const Cap = capitalize(moduleName);
+  const routePath = toKebabPlural(moduleName);
+  const exportName = `${Cap}Routes`;
+  const importLine = `import { ${exportName} } from "../module/${moduleName}/${moduleName}.route";`;
+  const useLine = `router.use("/${routePath}", ${exportName})`;
+
+  let content = fs.readFileSync(ROUTES_INDEX, "utf-8");
+
+  // Guard: skip if already registered
+  if (content.includes(exportName)) {
+    console.log(`ℹ️  Route for '${moduleName}' is already registered in index.ts — skipping.`);
+    return;
+  }
+
+  // 1. Inject import after the last import line
+  const lastImportIndex = content.lastIndexOf("\nimport ");
+  const endOfLastImport = content.indexOf("\n", lastImportIndex + 1);
+  content =
+    content.slice(0, endOfLastImport + 1) +
+    importLine +
+    "\n" +
+    content.slice(endOfLastImport + 1);
+
+  // 2. Inject router.use() before the export line
+  const exportLineIndex = content.indexOf("\nexport ");
+  content =
+    content.slice(0, exportLineIndex) +
+    "\n" +
+    useLine +
+    content.slice(exportLineIndex);
+
+  fs.writeFileSync(ROUTES_INDEX, content, "utf-8");
+  console.log(`🔗 Registered route: router.use("/${routePath}", ${exportName})`);
+};
+
+// ─── File Templates ────────────────────────────────────────────────────────────
 const generateModule = (moduleName) => {
   if (!moduleName) {
     console.error("Please provide a module name! Usage: node generateModule.js <moduleName>");
@@ -23,10 +79,9 @@ const generateModule = (moduleName) => {
 
   fs.mkdirSync(modulePath, { recursive: true });
 
-  const capitalize = (str) => str.charAt(0).toUpperCase() + str.slice(1);
   const Cap = capitalize(moduleName);
 
-  // ─── interface ────────────────────────────────────────────────────────────────
+  // ── interface ────────────────────────────────────────────────────────────────
   const interfaceFile = `
 export interface ICreate${Cap}Payload {
   name: string;
@@ -39,7 +94,7 @@ export interface IUpdate${Cap}Payload {
 }
 `.trimStart();
 
-  // ─── utils ────────────────────────────────────────────────────────────────────
+  // ── utils ────────────────────────────────────────────────────────────────────
   const utilsFile = `
 import { isValid, parse } from "date-fns";
 
@@ -51,7 +106,7 @@ export const convertToDateTime = (dateString: string | undefined) => {
 };
 `.trimStart();
 
-  // ─── validation ───────────────────────────────────────────────────────────────
+  // ── validation ───────────────────────────────────────────────────────────────
   const validationFile = `
 import z from "zod";
 
@@ -78,7 +133,7 @@ export const ${Cap}Validation = {
 };
 `.trimStart();
 
-  // ─── middleware ───────────────────────────────────────────────────────────────
+  // ── middleware ───────────────────────────────────────────────────────────────
   const middlewareFile = `
 import { NextFunction, Request, Response } from "express";
 import { IUpdate${Cap}Payload } from "./${moduleName}.interface.js";
@@ -105,7 +160,7 @@ export const update${Cap}Middleware = (
 };
 `.trimStart();
 
-  // ─── service ──────────────────────────────────────────────────────────────────
+  // ── service ──────────────────────────────────────────────────────────────────
   const serviceFile = `
 import { IRequestUser } from "../../interfaces/requestUser.interface.js";
 import { prisma } from "../../lib/prisma.js";
@@ -125,9 +180,7 @@ const getById = async (id: string) => {
 
 const create = async (user: IRequestUser, payload: ICreate${Cap}Payload) => {
   const result = await prisma.${moduleName}.create({
-    data: {
-      ...payload,
-    },
+    data: { ...payload },
   });
   return result;
 };
@@ -137,16 +190,13 @@ const updateById = async (
   id: string,
   payload: IUpdate${Cap}Payload
 ) => {
-  await prisma.${moduleName}.findUniqueOrThrow({
-    where: { id },
-  });
+  await prisma.${moduleName}.findUniqueOrThrow({ where: { id } });
 
   const result = await prisma.$transaction(async (tx) => {
-    const updated = await tx.${moduleName}.update({
+    return await tx.${moduleName}.update({
       where: { id },
       data: { ...payload },
     });
-    return updated;
   });
 
   return result;
@@ -154,10 +204,7 @@ const updateById = async (
 
 const deleteById = async (id: string) => {
   const result = await prisma.$transaction(async (tx) => {
-    const deleted = await tx.${moduleName}.delete({
-      where: { id },
-    });
-    return deleted;
+    return await tx.${moduleName}.delete({ where: { id } });
   });
   return result;
 };
@@ -171,7 +218,7 @@ export const ${Cap}Service = {
 };
 `.trimStart();
 
-  // ─── controller ───────────────────────────────────────────────────────────────
+  // ── controller ───────────────────────────────────────────────────────────────
   const controllerFile = `
 import { Request, Response } from "express";
 import status from "http-status";
@@ -241,7 +288,7 @@ export const ${Cap}Controller = {
 };
 `.trimStart();
 
-  // ─── route ────────────────────────────────────────────────────────────────────
+  // ── route ────────────────────────────────────────────────────────────────────
   const routeFile = `
 import { Router } from "express";
 import { Role } from "../../../generated/prisma/enums.js";
@@ -254,17 +301,9 @@ import { ${Cap}Validation } from "./${moduleName}.validation.js";
 
 const router = Router();
 
-router.get(
-  "/",
-  checkAuth(Role.ADMIN),
-  ${Cap}Controller.getAll
-);
+router.get("/", checkAuth(Role.ADMIN), ${Cap}Controller.getAll);
 
-router.get(
-  "/:id",
-  checkAuth(Role.ADMIN),
-  ${Cap}Controller.getById
-);
+router.get("/:id", checkAuth(Role.ADMIN), ${Cap}Controller.getById);
 
 router.post(
   "/",
@@ -276,24 +315,18 @@ router.post(
 router.patch(
   "/:id",
   checkAuth(Role.ADMIN),
-  multerUpload.fields([
-    { name: "profilePhoto", maxCount: 1 },
-  ]),
+  multerUpload.fields([{ name: "profilePhoto", maxCount: 1 }]),
   update${Cap}Middleware,
   validateRequest(${Cap}Validation.update${Cap}ZodSchema),
   ${Cap}Controller.updateById
 );
 
-router.delete(
-  "/:id",
-  checkAuth(Role.ADMIN),
-  ${Cap}Controller.deleteById
-);
+router.delete("/:id", checkAuth(Role.ADMIN), ${Cap}Controller.deleteById);
 
 export const ${Cap}Routes = router;
 `.trimStart();
 
-  // ─── Write all files ──────────────────────────────────────────────────────────
+  // ── Write files ──────────────────────────────────────────────────────────────
   const filesToCreate = {
     [`${moduleName}.interface.ts`]: interfaceFile,
     [`${moduleName}.utils.ts`]: utilsFile,
@@ -311,7 +344,9 @@ export const ${Cap}Routes = router;
   }
 
   console.log(`\n🎉 Module '${moduleName}' generated at ${modulePath}`);
-  console.log(`\n📌 Register ${Cap}Routes in your main router!`);
+
+  // ── Auto-register route ──────────────────────────────────────────────────────
+  registerRoute(moduleName);
 };
 
 const [, , moduleName] = process.argv;
